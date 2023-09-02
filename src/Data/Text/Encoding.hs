@@ -336,7 +336,7 @@ streamDecodeUtf8With ::
 streamDecodeUtf8With onErr = loop Nothing
   where
     loop mayResume chunk =
-      let Decoded builder mayResume' = decodeChunk validateChunk onErr chunk mayResume
+      let Decoded builder mayResume' = decodeChunk validateChunkSlow onErr chunk mayResume
 
           bs = case mayResume' of
                  Nothing      -> B.empty
@@ -363,7 +363,7 @@ decodeUtf8With ::
 #endif
   OnDecodeError -> ByteString -> Text
 decodeUtf8With onErr bs =
-  let Decoded builder mayResume = decodeChunk validateChunk onErr bs Nothing
+  let Decoded builder mayResume = decodeChunk validateChunkSlow onErr bs Nothing
   in case mayResume of
        Nothing -> strictBuilderToText builder
        Just _  -> strictBuilderToText $
