@@ -23,6 +23,11 @@ module Data.Text.Internal.StrictBuilder
     -- $unsafe
   , unsafeFromByteString
   , unsafeFromWord8
+
+  , unsafeWrite1
+  , unsafeWrite2
+  , unsafeWrite3
+  , unsafeWrite4
   ) where
 
 import Control.Monad.ST (ST, runST)
@@ -110,8 +115,30 @@ fromChar c =
 --
 -- @since 2.0.2
 unsafeFromWord8 :: Word8 -> StrictBuilder
-unsafeFromWord8 !w =
-  StrictBuilder 1 (\dst ofs -> A.unsafeWrite dst ofs w)
+unsafeFromWord8 !w = unsafeWrite1 w
+
+unsafeWrite1 :: Word8 -> StrictBuilder
+unsafeWrite1 w0 =
+  StrictBuilder 1 $ \dst ofs -> A.unsafeWrite dst ofs w0
+
+unsafeWrite2 :: Word8 -> Word8 -> StrictBuilder
+unsafeWrite2 w0 w1 =
+  StrictBuilder 2 $ \dst ofs -> do A.unsafeWrite dst  ofs      w0
+                                   A.unsafeWrite dst (ofs + 1) w1
+
+unsafeWrite3 :: Word8 -> Word8 -> Word8 -> StrictBuilder
+unsafeWrite3 w0 w1 w2 =
+  StrictBuilder 3 $ \dst ofs -> do A.unsafeWrite dst  ofs      w0
+                                   A.unsafeWrite dst (ofs + 1) w1
+                                   A.unsafeWrite dst (ofs + 2) w2
+
+unsafeWrite4 :: Word8 -> Word8 -> Word8 -> Word8 -> StrictBuilder
+unsafeWrite4 w0 w1 w2 w3 =
+  StrictBuilder 4 $ \dst ofs -> do A.unsafeWrite dst  ofs      w0
+                                   A.unsafeWrite dst (ofs + 1) w1
+                                   A.unsafeWrite dst (ofs + 2) w2
+                                   A.unsafeWrite dst (ofs + 3) w3
+
 
 -- | Copy 'Text' in a 'StrictBuilder'
 --

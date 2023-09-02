@@ -135,6 +135,9 @@ library
     build-depends: base < 0
 
   exposed-modules:
+    Codec.Decoding.UTF8
+    Codec.Decoding.UTF8.Unsafe
+    Codec.Encoding.UTF8
     Data.Text
     Data.Text.Array
     Data.Text.Encoding

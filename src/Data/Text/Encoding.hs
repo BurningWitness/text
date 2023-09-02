@@ -47,10 +47,10 @@ module Data.Text.Encoding
 
     -- *** Incremental UTF-8 decoding
     -- $incremental
-    , decodeUtf8Chunk
-    , decodeUtf8More
-    , Utf8State
-    , startUtf8State
+--  , decodeUtf8Chunk
+--  , decodeUtf8More
+--  , Utf8State
+--  , startUtf8State
     , StrictBuilder
     , strictBuilderToText
     , textToStrictBuilder
@@ -80,8 +80,8 @@ module Data.Text.Encoding
 
     -- * ByteString validation
     -- $validation
-    , validateUtf8Chunk
-    , validateUtf8More
+--  , validateUtf8Chunk
+--  , validateUtf8More
     ) where
 
 import Control.Exception (evaluate, try)
@@ -112,6 +112,7 @@ import qualified Data.ByteString.Short.Internal as SBS
 import qualified Data.Text.Array as A
 import qualified Data.Text.Internal.Encoding.Fusion as E
 import qualified Data.Text.Internal.Fusion as F
+import qualified Data.Text.Internal.StrictBuilder as SB
 #if defined(ASSERTS)
 import GHC.Stack (HasCallStack)
 #endif
@@ -332,11 +333,25 @@ streamDecodeUtf8With ::
   HasCallStack =>
 #endif
   OnDecodeError -> ByteString -> Decoding
-streamDecodeUtf8With onErr = loop startUtf8State
+streamDecodeUtf8With onErr = loop Nothing
   where
-    loop s chunk =
-      let (builder, undecoded, s') = decodeUtf8With2 onErr invalidUtf8Msg s chunk
-      in Some (strictBuilderToText builder) undecoded (loop s')
+    loop mayResume chunk =
+      let Decoded builder mayResume' = decodeChunk validateChunk onErr chunk mayResume
+
+          bs = case mayResume' of
+                 Nothing      -> B.empty
+                 Just resume' ->
+                   case resume' of
+                     Resume_2_2 u0 _f0 -> B.pack [u0]
+                     Resume_2_3 u0 _f0 -> B.pack [u0]
+                     Resume_2_4 u0 _f0 -> B.pack [u0]
+
+                     Resume_3_3 u0 u1 _f1 -> B.pack [u0, u1]
+                     Resume_3_4 u0 u1 _f1 -> B.pack [u0, u1]
+
+                     Resume_4   u0 u1 u2 _f2 -> B.pack [u0, u1, u2]
+
+      in Some (strictBuilderToText builder) bs (loop mayResume')
 
 -- | Decode a 'ByteString' containing UTF-8 encoded text.
 --
@@ -347,7 +362,14 @@ decodeUtf8With ::
   HasCallStack =>
 #endif
   OnDecodeError -> ByteString -> Text
-decodeUtf8With onErr = decodeUtf8With1 onErr invalidUtf8Msg
+decodeUtf8With onErr bs =
+  let Decoded builder mayResume = decodeChunk validateChunk onErr bs Nothing
+  in case mayResume of
+       Nothing -> strictBuilderToText builder
+       Just _  -> strictBuilderToText $
+                    case onErr invalidUtf8Msg $ Just 0 of
+                      Nothing -> builder
+                      Just c  -> builder <> SB.fromChar c
 
 invalidUtf8Msg :: String
 invalidUtf8Msg = "Data.Text.Encoding: Invalid UTF-8 stream"
