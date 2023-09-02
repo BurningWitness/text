@@ -245,15 +245,17 @@ validateUtf8Chunk bs = validateUtf8ChunkFrom 0 bs (,)
 validateUtf8ChunkFrom :: forall r. Int -> ByteString -> (Int -> Maybe Utf8State -> r) -> r
 validateUtf8ChunkFrom ofs bs k
   -- B.isValidUtf8 is buggy before bytestring-0.11.5.0
-#if defined(SIMDUTF) || MIN_VERSION_bytestring(0,11,5)
+-- #if defined(SIMDUTF) || MIN_VERSION_bytestring(0,11,5)
+#if FALSE
   | guessUtf8Boundary > 0 &&
     -- the rest of the bytestring is valid utf-8 up to the boundary
     (
-#ifdef SIMDUTF
+-- #ifdef SIMDUTF
+#if FALSE
       withBS (B.drop ofs bs) $ \ fp _ -> unsafeDupablePerformIO $
         unsafeWithForeignPtr fp $ \ptr -> (/= 0) <$>
           c_is_valid_utf8 ptr (fromIntegral guessUtf8Boundary)
-#else
+-- #else
       B.isValidUtf8 $ B.take guessUtf8Boundary (B.drop ofs bs)
 #endif
     ) = slowValidateUtf8ChunkFrom (ofs + guessUtf8Boundary)
