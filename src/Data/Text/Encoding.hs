@@ -335,14 +335,14 @@ streamDecodeUtf8With ::
 #endif
   OnDecodeError -> ByteString -> Decoding
 streamDecodeUtf8With onErr = \chunk ->
-  loop chunk (decodeChunk validateChunkSlow onErr chunk)
+  loop chunk (decodeChunk validateChunk onErr chunk)
   where
     loop chunk (Decoded builder mayResume) =
       let ~(remainder, next) =
             case mayResume of
               NoResume          ->
                 ( B.empty
-                , \chunk' -> loop chunk' (decodeChunk validateChunkSlow onErr chunk')
+                , \chunk' -> loop chunk' (decodeChunk validateChunk onErr chunk')
                 )
               Resume off resume ->
                 ( B.unsafeDrop (B.length chunk - off) chunk
@@ -362,7 +362,7 @@ decodeUtf8With ::
 #endif
   OnDecodeError -> ByteString -> Text
 decodeUtf8With onErr bs =
-  let Decoded builder mayResume = decodeChunk validateChunkSlow onErr bs
+  let Decoded builder mayResume = decodeChunk validateChunk onErr bs
   in case mayResume of
        NoResume   -> strictBuilderToText builder
        Resume _ _ -> strictBuilderToText $

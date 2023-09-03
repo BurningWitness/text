@@ -117,7 +117,7 @@ decodeUtf8With onErr = loop TE.NoResume
         B.Chunk b bs ->
           let TE.Decoded builder mayResume' =
                 case mayResume of
-                  TE.NoResume        -> TE.decodeChunk TE.validateChunkSlow onErr b
+                  TE.NoResume        -> TE.decodeChunk TE.validateChunk onErr b
                   TE.Resume _ resume -> resume b
 
           in chunkb builder $ loop mayResume' bs
