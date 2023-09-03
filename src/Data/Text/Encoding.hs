@@ -334,21 +334,28 @@ streamDecodeUtf8With ::
   HasCallStack =>
 #endif
   OnDecodeError -> ByteString -> Decoding
-streamDecodeUtf8With onErr = loop NoResume
+streamDecodeUtf8With onErr = \chunk ->
+  loop chunk (decodeChunk validateChunkSlow onErr chunk)
   where
-    loop mayResume chunk =
-      let ~(remainder, Decoded builder mayResume') =
+    loop chunk (Decoded builder mayResume) =
+      let ~(remainder, next) =
             case mayResume of
-              NoResume          -> (B.empty, decodeChunk validateChunkSlow onErr chunk)
+              NoResume          ->
+                ( B.empty
+                , \chunk' -> loop chunk' (decodeChunk validateChunkSlow onErr chunk')
+                )
               Resume off resume ->
-                (B.unsafeDrop (B.length chunk - off) chunk, resume chunk)
+                ( B.unsafeDrop (B.length chunk - off) chunk
+                , \chunk' -> loop chunk' (resume chunk')
+                )
 
-      in Some (strictBuilderToText builder) remainder (loop mayResume')
+      in Some (strictBuilderToText builder) remainder next
 
 -- | Decode a 'ByteString' containing UTF-8 encoded text.
 --
 -- Surrogate code points in replacement character returned by 'OnDecodeError'
 -- will be automatically remapped to the replacement char @U+FFFD@.
+{-# INLINEABLE decodeUtf8With #-}
 decodeUtf8With ::
 #if defined(ASSERTS)
   HasCallStack =>

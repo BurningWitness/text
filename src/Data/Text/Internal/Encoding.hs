@@ -92,28 +92,25 @@ validateChunk bs n =
        then n
        else
          if nonCont $ B.unsafeIndex bs i0
-           then validate i0
+           then validate len
            else
              if nonCont $ B.unsafeIndex bs i1
-               then validate i1
+               then validate i0
                else
                  if nonCont $ B.unsafeIndex bs i2
-                   then validate i2
+                   then validate i1
                    else
                      if nonCont $ B.unsafeIndex bs i3
-                       then validate i3
-                       else fallback
+                       then validate i2
+                       else validateChunkSlow bs n
 
   where
-    {-# NOINLINE fallback #-}
-    fallback = validateChunkSlow bs n
-
     validate i =
 #ifdef SIMDUTF
       let advance x =
               case x of
                 1 -> i
-                _ -> fallback
+                _ -> validateChunkSlow bs n
 
       in advance .
            withBS (B.drop n bs) $ \fp _ ->
@@ -123,7 +120,7 @@ validateChunk bs n =
 #else
       if B.isValidUtf8 $ B.take i (B.drop n bs)
         then i
-        else fallback
+        else validateChunkSlow bs n
 #endif
 #else
   validateChunkSlow bs n
@@ -212,7 +209,6 @@ decodeChunk
   -> Decoded
 decodeChunk validate handler = (\ ~(no_re, _, _, _, _, _, _) -> no_re ) . looper
   where
-    {-# INLINE looper #-}
     looper bs =
       ( fast mempty 0
       , slow_2_2 mempty 0
