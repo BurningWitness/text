@@ -109,6 +109,7 @@ import qualified Data.ByteString.Builder.Internal as B hiding (empty, append)
 import qualified Data.ByteString.Builder.Prim as BP
 import qualified Data.ByteString.Builder.Prim.Internal as BP
 import qualified Data.ByteString.Short.Internal as SBS
+import qualified Data.ByteString.Unsafe as B
 import qualified Data.Text.Array as A
 import qualified Data.Text.Internal.Encoding.Fusion as E
 import qualified Data.Text.Internal.Fusion as F
@@ -333,25 +334,16 @@ streamDecodeUtf8With ::
   HasCallStack =>
 #endif
   OnDecodeError -> ByteString -> Decoding
-streamDecodeUtf8With onErr = loop Nothing
+streamDecodeUtf8With onErr = loop NoResume
   where
     loop mayResume chunk =
-      let Decoded builder mayResume' = decodeChunk validateChunkSlow onErr chunk mayResume
+      let ~(remainder, Decoded builder mayResume') =
+            case mayResume of
+              NoResume          -> (B.empty, decodeChunk validateChunkSlow onErr chunk)
+              Resume off resume ->
+                (B.unsafeDrop (B.length chunk - off) chunk, resume chunk)
 
-          bs = case mayResume' of
-                 Nothing      -> B.empty
-                 Just resume' ->
-                   case resume' of
-                     Resume_2_2 u0 _f0 -> B.pack [u0]
-                     Resume_2_3 u0 _f0 -> B.pack [u0]
-                     Resume_2_4 u0 _f0 -> B.pack [u0]
-
-                     Resume_3_3 u0 u1 _f1 -> B.pack [u0, u1]
-                     Resume_3_4 u0 u1 _f1 -> B.pack [u0, u1]
-
-                     Resume_4   u0 u1 u2 _f2 -> B.pack [u0, u1, u2]
-
-      in Some (strictBuilderToText builder) bs (loop mayResume')
+      in Some (strictBuilderToText builder) remainder (loop mayResume')
 
 -- | Decode a 'ByteString' containing UTF-8 encoded text.
 --
@@ -363,13 +355,13 @@ decodeUtf8With ::
 #endif
   OnDecodeError -> ByteString -> Text
 decodeUtf8With onErr bs =
-  let Decoded builder mayResume = decodeChunk validateChunkSlow onErr bs Nothing
+  let Decoded builder mayResume = decodeChunk validateChunkSlow onErr bs
   in case mayResume of
-       Nothing -> strictBuilderToText builder
-       Just _  -> strictBuilderToText $
-                    case onErr invalidUtf8Msg $ Just 0 of
-                      Nothing -> builder
-                      Just c  -> builder <> SB.fromChar c
+       NoResume   -> strictBuilderToText builder
+       Resume _ _ -> strictBuilderToText $
+                       case onErr invalidUtf8Msg $ Just 0 of
+                         Nothing -> builder
+                         Just c  -> builder <> SB.fromChar c
 
 invalidUtf8Msg :: String
 invalidUtf8Msg = "Data.Text.Encoding: Invalid UTF-8 stream"
