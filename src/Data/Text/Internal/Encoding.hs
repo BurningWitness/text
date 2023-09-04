@@ -86,23 +86,28 @@ validateChunk bs n =
       i2 = i1 - 1
       i3 = i2 - 1
 
+      u0 = B.unsafeIndex bs i0
+
       nonCont u = (u .&. 0x80) == 0 || (u .&. 0x40) /= 0
 
   in if len - n < 4
        then n
        else
-         if nonCont $ B.unsafeIndex bs i0
+         if u0 .&. 0x80 == 0
            then validate len
            else
-             if nonCont $ B.unsafeIndex bs i1
+             if u0 .&. 0x40 /= 0
                then validate i0
                else
-                 if nonCont $ B.unsafeIndex bs i2
+                 if nonCont $ B.unsafeIndex bs i1
                    then validate i1
                    else
-                     if nonCont $ B.unsafeIndex bs i3
+                     if nonCont $ B.unsafeIndex bs i2
                        then validate i2
-                       else validateChunkSlow bs n
+                       else
+                         if nonCont $ B.unsafeIndex bs i3
+                           then validate i3
+                           else validateChunkSlow bs n
 
   where
     validate i =
@@ -207,139 +212,205 @@ decodeChunk
   -> OnDecodeError
   -> ByteString
   -> Decoded
-decodeChunk validate handler = (\ ~(no_re, _, _, _, _, _, _) -> no_re ) . looper
-  where
-    looper bs =
-      ( fast mempty 0
-      , slow_2_2 mempty 0
-      , slow_2_3 mempty 0
-      , slow_2_4 mempty 0
-      , slow_3_3 mempty 0
-      , slow_3_4 mempty 0
-      , slow_4   mempty 0
-      )
-      where
-        {-# NOINLINE len #-}
-        len = B.length bs
+decodeChunk validate handler = fast validate handler mempty 0
 
-        {-# INLINE recover #-}
-        recover copy n _e =
-          case handler "Data.Text.Encoding: Invalid UTF-8 stream" $ Just 0 of
-            Just c  -> if n >= len
-                         then Decoded (copy <> SB.fromChar c) NoResume
-                         else slow (copy <> SB.fromChar c) n
+{-# INLINE recover #-}
+recover
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> ByteString
+  -> Decoded
+recover validate handler copy n bs =
+  case handler "Data.Text.Encoding: Invalid UTF-8 stream" $ Just 0 of
+    Just c  -> if n >= B.length bs
+                 then Decoded (copy <> SB.fromChar c) NoResume
+                 else slow validate handler (copy <> SB.fromChar c) n bs
 
-            Nothing -> if n >= len
-                         then Decoded copy NoResume
-                         else slow copy n
+    Nothing -> if n >= B.length bs
+                 then Decoded copy NoResume
+                 else slow validate handler copy n bs
 
-        {-# INLINE slow_2_2 #-}
-        slow_2_2 copy n1 u0 f0 =
-          let n2 = n1 + 1
-              u1 = B.unsafeIndex bs n1
+{-# INLINE slow_2_2 #-}
+slow_2_2
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> (Word8 -> UTF8_2)
+  -> ByteString
+  -> Decoded
+slow_2_2 validate handler copy n1 u0 f0 bs =
+  let n2 = n1 + 1
+      u1 = B.unsafeIndex bs n1
 
-          in case f0 u1 of
-               UTF8_2 _  -> fast (copy <> SB.unsafeWrite2 u0 u1) n2
-               Error_2 e -> recover copy n1 e
+  in case f0 u1 of
+       UTF8_2 _   -> fast validate handler (copy <> SB.unsafeWrite2 u0 u1) n2 bs
+       Error_2 _e -> recover validate handler copy n1 bs
 
-        {-# INLINE slow_2_3 #-}
-        slow_2_3 copy n1 u0 f0 =
-          let n2 = n1 + 1
-              u1 = B.unsafeIndex bs n1
+{-# INLINE slow_2_3 #-}
+slow_2_3
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> (Word8 -> Part_3_1)
+  -> ByteString
+  -> Decoded
+slow_2_3 validate handler copy n1 u0 f0 bs =
+  let n2 = n1 + 1
+      u1 = B.unsafeIndex bs n1
 
-          in case f0 u1 of
-               Part_3_2 f1 ->
-                 if n2 >= len
-                   then Decoded copy .
-                          Resume 2 $ (\ ~(_,_,_,_,re_3_3,_,_) -> re_3_3 u0 u1 f1) . looper
-                   else slow_3_3 copy n2 u0 u1 f1
+  in case f0 u1 of
+       Part_3_2 f1  ->
+         if n2 >= B.length bs
+           then Decoded copy .
+                  Resume 2 $ slow_3_3 validate handler mempty 0 u0 u1 f1
+           else slow_3_3 validate handler copy n2 u0 u1 f1 bs
 
-               Error_3_1 e -> recover copy n1 e
+       Error_3_1 _e -> recover validate handler copy n1 bs
 
-        {-# INLINE slow_3_3 #-}
-        slow_3_3 copy n2 u0 u1 f1 =
-          let n3 = n2 + 1
-              u2 = B.unsafeIndex bs n2
+{-# INLINE slow_3_3 #-}
+slow_3_3
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> Word8
+  -> (Word8 -> UTF8_3)
+  -> ByteString
+  -> Decoded
+slow_3_3 validate handler copy n2 u0 u1 f1 bs =
+  let n3 = n2 + 1
+      u2 = B.unsafeIndex bs n2
 
-          in case f1 u2 of
-               UTF8_3 _    -> fast (copy <> SB.unsafeWrite3 u0 u1 u2) n3
-               Error_3_2 e -> recover copy n2 e
-
-
-        {-# INLINE slow_2_4 #-}
-        slow_2_4 copy n1 u0 f0 =
-          let n2 = n1 + 1
-              u1 = B.unsafeIndex bs n1
-
-          in case f0 u1 of
-               Part_4_2 f1 ->
-                 if n2 >= len
-                   then Decoded copy .
-                          Resume 2 $ (\ ~(_,_,_,_,_,re_3_4,_) -> re_3_4 u0 u1 f1) . looper
-                   else slow_3_4 copy n2 u0 u1 f1
-
-               Error_4_1 e -> recover copy n1 e
-
-        {-# INLINE slow_3_4 #-}
-        slow_3_4 copy n2 u0 u1 f1 =
-          let n3 = n2 + 1
-              u2 = B.unsafeIndex bs n2
-
-          in case f1 u2 of
-               Part_4_3 f2 ->
-                 if n3 >= len
-                   then Decoded copy .
-                          Resume 3 $ (\ ~(_,_,_,_,_,_,re_4) -> re_4 u0 u1 u2 f2) . looper
-                   else slow_4 copy n3 u0 u1 u2 f2
-
-               Error_4_2 e -> recover copy n2 e
-
-        {-# INLINE slow_4 #-}
-        slow_4 !copy n3 u0 u1 u2 f2 =
-          let n4 = n3 + 1
-              u3 = B.unsafeIndex bs n3
-
-          in case f2 u3 of
-               UTF8_4 _    -> fast (copy <> SB.unsafeWrite4 u0 u1 u2 u3) n4
-               Error_4_3 e -> recover copy n3 e
+  in case f1 u2 of
+       UTF8_3 _     -> fast validate handler (copy <> SB.unsafeWrite3 u0 u1 u2) n3 bs
+       Error_3_2 _e -> recover validate handler copy n2 bs
 
 
-        {-# NOINLINE fast #-}
-        fast !copy n0
-          | n0 >= len = Decoded copy NoResume
-          | otherwise =
-              let n' = validate bs n0
-                  copyBS = copy <> SB.unsafeFromByteString (B.unsafeDrop n0 (B.unsafeTake n' bs))
-              in if n' >= len
-                   then Decoded copyBS NoResume
-                   else if n' > n0
-                          then slow copyBS n'
-                          else slow copy n0
+{-# INLINE slow_2_4 #-}
+slow_2_4
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> (Word8 -> Part_4_1)
+  -> ByteString
+  -> Decoded
+slow_2_4 validate handler copy n1 u0 f0 bs =
+  let n2 = n1 + 1
+      u1 = B.unsafeIndex bs n1
 
-        {-# NOINLINE slow #-}
-        slow !copy n0 =
-          let n1 = n0 + 1
-              u0 = B.unsafeIndex bs n0
+  in case f0 u1 of
+       Part_4_2 f1  ->
+         if n2 >= B.length bs
+           then Decoded copy .
+                  Resume 2 $ slow_3_4 validate handler mempty 0 u0 u1 f1
+           else slow_3_4 validate handler copy n2 u0 u1 f1 bs
 
-          in case utf8 u0 of
-               UTF8_1 _  -> fast (copy <> SB.unsafeWrite1 u0) n1
+       Error_4_1 _e -> recover validate handler copy n1 bs
 
-               Part_2 f0 ->
-                 if n1 >= len
-                   then Decoded copy .
-                          Resume 1 $ (\ ~(_,re_2_2,_,_,_,_,_) -> re_2_2 u0 f0) . looper
-                   else slow_2_2 copy n1 u0 f0
+{-# INLINE slow_3_4 #-}
+slow_3_4
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> Word8
+  -> (Word8 -> Part_4_2)
+  -> ByteString
+  -> Decoded
+slow_3_4 validate handler copy n2 u0 u1 f1 bs =
+  let n3 = n2 + 1
+      u2 = B.unsafeIndex bs n2
 
-               Part_3_1 f0 ->
-                 if n1 >= len
-                   then Decoded copy .
-                          Resume 1 $ (\ ~(_,_,re_2_3,_,_,_,_) -> re_2_3 u0 f0) . looper
-                   else slow_2_3 copy n1 u0 f0
+  in case f1 u2 of
+       Part_4_3 f2  ->
+         if n3 >= B.length bs
+           then Decoded copy .
+                  Resume 3 $ slow_4 validate handler mempty 0 u0 u1 u2 f2
+           else slow_4 validate handler copy n3 u0 u1 u2 f2 bs
 
-               Part_4_1 f0 ->
-                 if n1 >= len
-                   then Decoded copy .
-                          Resume 1 $ (\ ~(_,_,_,re_2_4,_,_,_) -> re_2_4 u0 f0) . looper
-                   else slow_2_4 copy n1 u0 f0
+       Error_4_2 _e -> recover validate handler copy n2 bs
 
-               Error_1 e -> recover copy n1 e
+{-# INLINE slow_4 #-}
+slow_4
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> Word8
+  -> Word8
+  -> Word8
+  -> (Word8 -> UTF8_4)
+  -> ByteString
+  -> Decoded
+slow_4 validate handler copy n3 u0 u1 u2 f2 bs =
+  let n4 = n3 + 1
+      u3 = B.unsafeIndex bs n3
+
+  in case f2 u3 of
+       UTF8_4 _     -> fast validate handler (copy <> SB.unsafeWrite4 u0 u1 u2 u3) n4 bs
+       Error_4_3 _e -> recover validate handler copy n3 bs
+
+
+{-# NOINLINE fast #-}
+fast
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> ByteString
+  -> Decoded
+fast validate handler !copy n0 bs
+  | n0 >= B.length bs = Decoded copy NoResume
+  | otherwise =
+      let n' = validate bs n0
+          copyBS = copy <> SB.unsafeFromByteString (B.unsafeDrop n0 (B.unsafeTake n' bs))
+      in if n' >= B.length bs
+           then Decoded copyBS NoResume
+           else if n' > n0
+                  then slow validate handler copyBS n' bs
+                  else slow validate handler copy   n0 bs
+
+{-# NOINLINE slow #-}
+slow
+  :: (ByteString -> Int -> Int)
+  -> OnDecodeError
+  -> StrictBuilder
+  -> Int
+  -> ByteString
+  -> Decoded
+slow validate handler !copy n0 bs =
+  let n1 = n0 + 1
+      u0 = B.unsafeIndex bs n0
+
+  in case utf8 u0 of
+       UTF8_1 _  -> fast validate handler (copy <> SB.unsafeWrite1 u0) n1 bs
+
+       Part_2 f0 ->
+         if n1 >= B.length bs
+           then Decoded copy .
+                  Resume 1 $ slow_2_2 validate handler mempty 0 u0 f0
+           else slow_2_2 validate handler copy n1 u0 f0 bs
+
+       Part_3_1 f0 ->
+         if n1 >= B.length bs
+           then Decoded copy .
+                  Resume 1 $ slow_2_3 validate handler mempty 0 u0 f0
+           else slow_2_3 validate handler copy n1 u0 f0 bs
+
+       Part_4_1 f0 ->
+         if n1 >= B.length bs
+           then Decoded copy .
+                  Resume 1 $ slow_2_4 validate handler mempty 0 u0 f0
+           else slow_2_4 validate handler copy n1 u0 f0 bs
+
+       Error_1 _e -> recover validate handler copy n1 bs
