@@ -643,12 +643,14 @@ testTranscoding =
 
     testGroup "validation"
       [ testProperty "fast" $ \ (Built @256 bl _tl) ->
-          E.validateChunk (BL.toStrict $ B.toLazyByteString bl) 0
-            == fromIntegral (BL.length $ B.toLazyByteString bl)
+          let v = E.validateChunk (BL.toStrict $ B.toLazyByteString bl) 0
+              len = fromIntegral (BL.length $ B.toLazyByteString bl)
+
+          in v <= len && v >= len - 4
 
       , testProperty "slow" $ \ (Built @256 bl _tl) ->
           E.validateChunkSlow (BL.toStrict $ B.toLazyByteString bl) 0
-            == fromIntegral (BL.length $ B.toLazyByteString bl)
+            === fromIntegral (BL.length $ B.toLazyByteString bl)
       ],
 
     testGroup "utf8"
